@@ -27,6 +27,19 @@ The bigger finding is *why* the remaining errors happen. Slowdowns tend to hit o
 
 I picked the model settings using a separate split (train Mar–Oct, check on November), so the Dec–Jan test months were never used to tune anything. All scores use the real kit days.
 
+**Key terms used below**
+
+| Term | Plain meaning |
+|---|---|
+| LightGBM | A widely used model that combines many small decision trees. It's a standard choice for spreadsheet-style data |
+| Within 1 day | Share of orders where the predicted finish date is at most 1 day off. My main score |
+| Avg. days off (MAE) | On average, how many days the prediction misses by |
+| Macro-F1 | How well a model handles every order length (0, 1, 2, 3, 4+ days) equally, so it can't look good just by getting the common 1-day orders right. 0 to 1, higher is better |
+| Log loss | Scores the quality of the model's probabilities. It punishes being confidently wrong. Lower is better |
+| Calibration | Whether the probabilities mean what they say: of orders given a 20% risk, do about 20% actually run long? |
+| Precision / recall | For the risk flag: precision = of the flagged orders, how many really ran long; recall = of all the orders that ran long, how many got flagged |
+| Leakage | When a model accidentally uses information it wouldn't have in real life, which makes it look better than it is |
+
 ---
 
 ## 2. What slows kitting down
@@ -35,7 +48,7 @@ Before modeling, I started from how kitting works in practice. It should be fast
 
 | Idea | Result | What the data showed |
 |---|---|---|
-| H1. Part supply | Supported, indirectly | Some product families run long far more often than others (0% to 66.5% of orders taking 4+ days, among families with 200+ orders). The slowdowns come in bursts: 83 weeks where a single family ran much slower than the rest of the plant account for 31% of all slow orders |
+| H1. Part supply | Supported, indirectly | Some product families run long far more often than others (0% to 66.5% of orders taking 4+ days, among families with 200+ orders). The slowdowns come in bursts. In the historical data, there were 83 cases where one family had a much slower week than the rest of the plant, and those family-weeks hold 31% of all slow orders |
 | H2. Work schedules | Supported | Orders started on a Saturday average 2.08 days, versus 1.02 for Wednesday starts, because Sundays are rarely worked. A holiday within 3 days of the start doubles the share of slow orders (10.4% vs 4.8%). I couldn't isolate overtime, since 83% of days have some |
 | H3. Warehouse congestion | Can't tell | Warehouse 3JU looks slower than KHO (1.58 vs 1.28 days), but for the same products the gap disappears. 3JU just handles slower products. There's no data on space or how full a warehouse is |
 
@@ -97,7 +110,7 @@ Test set: 33,377 orders that started kitting between Dec 1, 2025 and Jan 31, 202
 ![Error analysis](figures/f5_error_analysis.png)
 
 - **Slow orders cause most of the error.** Orders taking 4+ days are 8.4% of orders but 40% of the total error. When the model is off by 2+ days, 93% of the time the order took longer than predicted, not shorter.
-- **Misses cluster by product and week.** 40 family-weeks, holding 8.5% of orders, contain 38% of all misses. It's the same burst pattern from H1.
+- **Misses cluster by product and week.** In the Dec–Jan test months, 40 family-weeks (one family in one week) held 8.5% of orders but 38% of the model's big misses (off by 2+ days). It's the same burst pattern from H1.
 - **Orders that look identical still finish at different times.** Take orders with the same product family, warehouse and start date. Everything the data records about them is the same, yet a third of the variation in kit time happens inside those groups, and 22% of them are in a group whose finish times span 3+ days. Whatever causes that isn't in the data.
 - **There's a ceiling.** Even a model that somehow knew each group's actual typical outcome would only get 93.4% within a day, compared with 86.2% for my model on those orders. Getting closer would take information these tables don't have.
 
@@ -105,9 +118,9 @@ Test set: 33,377 orders that started kitting between Dec 1, 2025 and Jan 31, 202
 
 ## 6. Recommendations
 
-1. **Record part availability for each order.** For example, whether any component was short or backordered when kitting started. This targets the biggest source of error: slowdowns that hit one product family at a time (31% of slow orders, and 38% of the model's misses). Right now those can only be explained after the fact. With a shortage flag, planners and the model could see them coming.
+1. **Record part availability for each order.** For example, whether any component was short or backordered when kitting started. This targets the biggest source of error: slowdowns that hit one product family at a time. In the historical data, 31% of slow orders came from these family-specific bursts, and in the test months, 38% of the model's big misses came from just 8.5% of orders. Right now those can only be explained after the fact. With a shortage flag, planners and the model could see them coming.
 
-2. **Record daily warehouse capacity and occupancy**, such as staging space used, kits in progress and headcount per shift. Right now I can't test whether congestion matters. Warehouses 3JU and 3JHF miss about 22% of orders versus about 10% at KHO, but the data can't say whether that's space, staffing or product mix.
+2. **Record daily warehouse capacity and occupancy**, such as staging space used, kits in progress and headcount per shift. Right now I can't test whether congestion matters. The model's prediction is off by 2+ days for about 22% of orders at warehouses 3JU and 3JHF, versus about 10% at KHO, but the data can't say whether that's space, staffing or product mix.
 
 3. **Use the risk score to prioritize each day's orders.** Give planners the top 10% riskiest orders (the `high_risk_flag` column in the planner CSV). On the test months, that list caught 37% of slow orders and was 3 times richer in them than a random pick. It's a small enough list to act on: expedite, check parts, or warn the customer early.
 
